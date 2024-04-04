@@ -26,9 +26,7 @@ var basicAmazonEbsHCL2Template string
 
 func TestAccInitAndBuildBasicAmazonEbs(t *testing.T) {
 	plugin := addrs.Plugin{
-		Hostname:  "github.com",
-		Namespace: "hashicorp",
-		Type:      "amazon",
+		Source: "github.com/hashicorp/amazon",
 	}
 	testCase := &acctest.PluginTestCase{
 		Name: "amazon-ebs_basic_plugin_init_and_build_test",
@@ -69,27 +67,31 @@ func TestAccInitAndBuildBasicAmazonEbs(t *testing.T) {
 	acctest.TestPlugin(t, testCase)
 }
 
-func cleanupPluginInstallation(plugin addrs.Plugin) error {
+func pluginDirectory(plugin addrs.Plugin) (string, error) {
 	home, err := homedir.Dir()
+	if err != nil {
+		return "", err
+	}
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		home = xdgConfigHome
+	}
+
+	pluginParts := []string{
+		home,
+		".packer.d",
+		"plugins",
+	}
+	pluginParts = append(pluginParts, plugin.Parts()...)
+	pluginPath := filepath.Join(pluginParts...)
+
+	return pluginPath, nil
+}
+
+func cleanupPluginInstallation(plugin addrs.Plugin) error {
+	pluginPath, err := pluginDirectory(plugin)
 	if err != nil {
 		return err
 	}
-	pluginPath := filepath.Join(home,
-		".packer.d",
-		"plugins",
-		plugin.Hostname,
-		plugin.Namespace,
-		plugin.Type)
-
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		pluginPath = filepath.Join(xdgConfigHome,
-			"packer",
-			"plugins",
-			plugin.Hostname,
-			plugin.Namespace,
-			plugin.Type)
-	}
-
 	testutils.CleanupFiles(pluginPath)
 	return nil
 }
@@ -100,25 +102,9 @@ func checkPluginInstallation(initOutput string, plugin addrs.Plugin) error {
 		return fmt.Errorf("logs doesn't contain expected foo value %q", initOutput)
 	}
 
-	home, err := homedir.Dir()
+	pluginPath, err := pluginDirectory(plugin)
 	if err != nil {
 		return err
-	}
-
-	pluginPath := filepath.Join(home,
-		".packer.d",
-		"plugins",
-		plugin.Hostname,
-		plugin.Namespace,
-		plugin.Type)
-
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		pluginPath = filepath.Join(xdgConfigHome,
-			"packer",
-			"plugins",
-			plugin.Hostname,
-			plugin.Namespace,
-			plugin.Type)
 	}
 
 	if !testutils.FileExists(pluginPath) {
