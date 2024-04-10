@@ -23,6 +23,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 	goversion "github.com/hashicorp/go-version"
 	pluginsdk "github.com/hashicorp/packer-plugin-sdk/plugin"
+	"github.com/hashicorp/packer-plugin-sdk/random"
 	"github.com/hashicorp/packer-plugin-sdk/tmp"
 	"github.com/hashicorp/packer/hcl2template/addrs"
 	"golang.org/x/mod/semver"
@@ -815,6 +816,61 @@ func (pr *Requirement) InstallLatest(opts InstallOptions) (*Installation, error)
 							err := fmt.Errorf("could not find a %q file in zipfile", expectedBinaryFilename)
 							errs = multierror.Append(errs, err)
 							return nil, errs
+						}
+
+						tempPluginPath := filepath.Join(os.TempDir(), fmt.Sprintf(
+							"packer-plugin-temp-%s%s",
+							random.Numbers(8),
+							opts.BinaryInstallationOptions.Ext))
+
+						// Save binary to temp so we can ensure it is really the version advertised
+						tempOutput, err := os.OpenFile(tempPluginPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+						if err != nil {
+							log.Printf("[ERROR] failed to create temp plugin executable: %s", err)
+							return nil, multierror.Append(errs, err)
+						}
+						defer os.Remove(tempPluginPath)
+
+						_, err = io.Copy(tempOutput, copyFrom)
+						if err != nil {
+							log.Printf("[ERROR] failed to copy uncompressed binary to %q: %s", tempPluginPath, err)
+							return nil, multierror.Append(errs, err)
+						}
+
+						// Not a problem on most platforms, but unsure Windows will let us execute an already
+						// open file, so we close it temporarily to avoid problems
+						_ = tempOutput.Close()
+
+						desc, err := GetPluginDescription(tempPluginPath)
+						if err != nil {
+							err := fmt.Errorf("failed to describe plugin binary %q: %s", tempPluginPath, err)
+							errs = multierror.Append(errs, err)
+							continue
+						}
+
+						descVersion, err := goversion.NewSemver(desc.Version)
+						if err != nil {
+							err := fmt.Errorf("invalid self-reported version %q: %s", desc.Version, err)
+							errs = multierror.Append(errs, err)
+							continue
+						}
+						if descVersion.Prerelease() != "" {
+							err := fmt.Errorf("release v%s binary reports version %q, which is unsupported. "+
+								"Try opening an issue on the plugin repository asking them to update the plugin's version information.",
+								version, desc.Version)
+							errs = multierror.Append(errs, err)
+							continue
+						}
+
+						if descVersion.Compare(version) != 0 {
+							log.Printf("[ERROR] binary reported version (%q) is different from the expected %q, skipping", desc.Version, version.String())
+							continue
+						}
+
+						copyFrom, err = os.OpenFile(tempPluginPath, os.O_RDONLY, 0755)
+						if err != nil {
+							log.Printf("[ERROR] failed to re-open temporary plugin file %q: %s", tempPluginPath, err)
+							return nil, multierror.Append(errs, err)
 						}
 
 						outputFile, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
