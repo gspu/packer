@@ -754,7 +754,11 @@ func (pr *Requirement) InstallLatest(opts InstallOptions) (*Installation, error)
 							errs = multierror.Append(errs, err)
 							return nil, errs
 						}
-						defer tmpFile.Close()
+						defer func() {
+							tmpFilePath := tmpFile.Name()
+							tmpFile.Close()
+							os.Remove(tmpFilePath)
+						}()
 
 						// start fetching binary
 						remoteZipFile, err := getter.Get("zip", GetOptions{
@@ -791,10 +795,6 @@ func (pr *Requirement) InstallLatest(opts InstallOptions) (*Installation, error)
 						if err := checksum.Checksummer.Checksum(checksum.Expected, tmpFile); err != nil {
 							err := fmt.Errorf("%w. Is the checksum file correct ? Is the binary file correct ?", err)
 							errs = multierror.Append(errs, err)
-							log.Printf("%s, truncating the zipfile", err)
-							if err := tmpFile.Truncate(0); err != nil {
-								log.Printf("[TRACE] %v", err)
-							}
 							continue
 						}
 
