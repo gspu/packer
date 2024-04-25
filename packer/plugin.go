@@ -152,7 +152,7 @@ func (c *PluginConfig) DiscoverMultiPlugin(pluginName, pluginPath string) error 
 		c.Builders.Set(key, func() (packersdk.Builder, error) {
 			return c.Client(pluginPath, "start", "builder", builderName).Builder()
 		})
-		PluginsDetailsStorage.AddPlugin(fmt.Sprintf("%q-%q", PluginComponentBuilder, key), pluginDetails)
+		GlobalPluginsDetailsStore.Set(fmt.Sprintf("%q-%q", PluginComponentBuilder, key), pluginDetails)
 
 	}
 
@@ -169,7 +169,7 @@ func (c *PluginConfig) DiscoverMultiPlugin(pluginName, pluginPath string) error 
 		c.PostProcessors.Set(key, func() (packersdk.PostProcessor, error) {
 			return c.Client(pluginPath, "start", "post-processor", postProcessorName).PostProcessor()
 		})
-		PluginsDetailsStorage.AddPlugin(fmt.Sprintf("%q-%q", PluginComponentPostProcessor, key), pluginDetails)
+		GlobalPluginsDetailsStore.Set(fmt.Sprintf("%q-%q", PluginComponentPostProcessor, key), pluginDetails)
 	}
 
 	if len(desc.PostProcessors) > 0 {
@@ -185,7 +185,7 @@ func (c *PluginConfig) DiscoverMultiPlugin(pluginName, pluginPath string) error 
 		c.Provisioners.Set(key, func() (packersdk.Provisioner, error) {
 			return c.Client(pluginPath, "start", "provisioner", provisionerName).Provisioner()
 		})
-		PluginsDetailsStorage.AddPlugin(fmt.Sprintf("%q-%q", PluginComponentProvisioner, key), pluginDetails)
+		GlobalPluginsDetailsStore.Set(fmt.Sprintf("%q-%q", PluginComponentProvisioner, key), pluginDetails)
 
 	}
 	if len(desc.Provisioners) > 0 {
@@ -201,7 +201,7 @@ func (c *PluginConfig) DiscoverMultiPlugin(pluginName, pluginPath string) error 
 		c.DataSources.Set(key, func() (packersdk.Datasource, error) {
 			return c.Client(pluginPath, "start", "datasource", datasourceName).Datasource()
 		})
-		PluginsDetailsStorage.AddPlugin(fmt.Sprintf("%q-%q", PluginComponentDataSource, key), pluginDetails)
+		GlobalPluginsDetailsStore.Set(fmt.Sprintf("%q-%q", PluginComponentDataSource, key), pluginDetails)
 	}
 	if len(desc.Datasources) > 0 {
 		log.Printf("found external %v datasource from %s plugin", desc.Datasources, pluginName)
@@ -269,35 +269,26 @@ type PluginDetails struct {
 	PluginPath  string
 }
 
-type SafePluginsDetailsStorage struct {
-	mutex sync.RWMutex
-	data  map[string]PluginDetails
+type PluginsDetailsStorage struct {
+	rwMutex sync.RWMutex
+	data    map[string]PluginDetails
 }
 
-var (
-	PluginsDetailsStorage *SafePluginsDetailsStorage
-	once                  sync.Once
-)
-
-func init() {
-	once.Do(func() {
-		PluginsDetailsStorage = &SafePluginsDetailsStorage{
-			data: make(map[string]PluginDetails),
-		}
-	})
+var GlobalPluginsDetailsStore = &PluginsDetailsStorage{
+	data: make(map[string]PluginDetails),
 }
 
-func (spds *SafePluginsDetailsStorage) AddPlugin(key string, plugin PluginDetails) {
-	spds.mutex.Lock()
-	defer spds.mutex.Unlock()
-	if _, exists := spds.data[key]; !exists {
-		spds.data[key] = plugin
+func (pds *PluginsDetailsStorage) Set(key string, plugin PluginDetails) {
+	pds.rwMutex.Lock()
+	defer pds.rwMutex.Unlock()
+	if _, exists := pds.data[key]; !exists {
+		pds.data[key] = plugin
 	}
 }
 
-func (spds *SafePluginsDetailsStorage) GetPlugin(key string) (PluginDetails, bool) {
-	spds.mutex.RLock()
-	plugin, exists := spds.data[key]
-	spds.mutex.RUnlock()
+func (pds *PluginsDetailsStorage) Get(key string) (PluginDetails, bool) {
+	pds.rwMutex.RLock()
+	defer pds.rwMutex.RUnlock()
+	plugin, exists := pds.data[key]
 	return plugin, exists
 }
